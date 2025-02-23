@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"http_server/internal/auth"
 	"http_server/internal/database"
 	"log"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,6 +17,7 @@ type apiConfig struct {
 	fileServerHits atomic.Int32
 	queries        database.Queries
 	Platform       string
+	secret         string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -56,7 +59,8 @@ func (cfg *apiConfig) reset() http.Handler {
 func (c *apiConfig) createUser() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		type request struct {
-			Email string `json:"email"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		var req request
 
@@ -65,15 +69,98 @@ func (c *apiConfig) createUser() http.Handler {
 			http.Error(rw, "Can not decode request", http.StatusUnprocessableEntity)
 			return
 		}
-		createdUser, err := c.queries.CreateUser(r.Context(), req.Email)
+		hashedPassword, err := auth.HashPassword(req.Password)
+		if err != nil {
+			http.Error(rw, "Error creating user password", http.StatusInternalServerError)
+			log.Printf("Error creating password hash: %s", err)
+			return
+		}
+		params := database.CreateUserParams{
+			Email:          req.Email,
+			HashedPassword: hashedPassword,
+		}
+		createdUser, err := c.queries.CreateUser(r.Context(), params)
 		if err != nil {
 			http.Error(rw, "Interal database error", http.StatusInternalServerError)
 			log.Println(err)
 			return
 		}
+		createdUser.HashedPassword = ""
 		rw.WriteHeader(http.StatusCreated)
 		json.NewEncoder(rw).Encode(&createdUser)
 		rw.Header().Add("Content-Type", "application/json")
+
+	})
+}
+
+func (c *apiConfig) login() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type requestStruct struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		type responseStruct struct {
+			ID           uuid.UUID `json:"id"`
+			CreatedAt    time.Time `json:"created_at"`
+			UpdatedAt    time.Time `json:"updated_at"`
+			Email        string    `json:"email"`
+			Token        string    `json:"token"`
+			Refreshtoken string    `json:"refresh_token"`
+		}
+
+		defer r.Body.Close()
+		var req requestStruct
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Error decoding request", http.StatusUnprocessableEntity)
+			log.Printf("Error decoding login request: %s", err)
+			return
+		}
+
+		user, err := c.queries.GetUserFromEmail(r.Context(), req.Email)
+		if err != nil {
+			http.Error(w, "Could not retrieve user", http.StatusInternalServerError)
+			log.Printf("Error retrieving user from database: %s", err)
+			return
+		}
+		if err := auth.CheckPasswordHash(req.Password, user.HashedPassword); err != nil {
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		res := responseStruct{
+			ID:           user.ID,
+			CreatedAt:    user.CreatedAt,
+			UpdatedAt:    user.UpdatedAt,
+			Email:        user.Email,
+			Token:        "",
+			Refreshtoken: "",
+		}
+
+		token, err := auth.MakeJWT(res.ID, c.secret, time.Second*3600)
+		if err != nil {
+			http.Error(w, "unable to create JWT token", http.StatusInternalServerError)
+			log.Printf("Unable to create JWT token: %s", err)
+			return
+		}
+		refreshToken, err := auth.MakeRefreshToken()
+		if err != nil {
+			http.Error(w, "Error creating refreshtoken", http.StatusInternalServerError)
+			return
+		}
+		_, err = c.queries.InsertRefreshToken(r.Context(), database.InsertRefreshTokenParams{
+			UserID:    res.ID,
+			Token:     refreshToken,
+			ExpiresAt: time.Now().Add(time.Hour * 1440)}) //60 days expire time, 24 hours * 60 days = 1440hours
+
+		if err != nil {
+			http.Error(w, "Error inserting token to database", http.StatusInternalServerError)
+		}
+		res.Refreshtoken = refreshToken
+		res.Token = token
+		if err := json.NewEncoder(w).Encode(&res); err != nil {
+			http.Error(w, "Error encoding response", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 
 	})
 }
@@ -118,6 +205,18 @@ func (c *apiConfig) postChirp() http.Handler {
 			User_id string `json:"user_id"`
 		}
 		defer r.Body.Close()
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			http.Error(rw, "Could not extract token from headers. Did you send it?", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("Have extracted token: %s", token)
+		user_id, err := auth.ValidateJWT(token, c.secret)
+		if err != nil {
+			http.Error(rw, "Unable to verify token", http.StatusUnauthorized)
+			log.Printf("Unable to verify token, err: %s", err)
+			return
+		}
 		var req requestStruct
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(rw, "Error unmarshaling request data", http.StatusUnprocessableEntity)
@@ -129,10 +228,9 @@ func (c *apiConfig) postChirp() http.Handler {
 		}
 
 		req.Body = cleanupInput(req.Body)
-		user_id, _ := uuid.Parse(req.User_id)
 		data := database.CreateChirpParams{
 			Body:   req.Body,
-			UserID: uuid.NullUUID{UUID: user_id, Valid: true},
+			UserID: user_id,
 		}
 
 		createdChirp, err := c.queries.CreateChirp(r.Context(), data)
@@ -146,4 +244,63 @@ func (c *apiConfig) postChirp() http.Handler {
 		rw.Header().Add("Content-Type", "application/json")
 
 	})
+}
+
+func (c *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
+	type responseStruct struct {
+		Token string `json:"token"`
+	}
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		http.Error(w, "Unable to extract token", http.StatusUnprocessableEntity)
+		return
+	}
+	log.Printf("Token extracted: %s\n", tokenString)
+	//TODO: should be refactored at later stage. Not needed to extract entire token object. I just need the UUID.
+	token, err := c.queries.GetOneRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		http.Error(w, "Unable to find refresh token", http.StatusNotFound)
+		log.Printf("Error extracting token from psql: %s\n", err)
+		return
+	}
+	log.Printf("Token after sql extraction: %s\n", token.Token)
+
+	if time.Now().After(token.ExpiresAt) || token.RevokedAt.Valid {
+		http.Error(w, "Token has expired or has been revoked", http.StatusUnauthorized)
+		return
+	}
+	authToken, err := auth.MakeJWT(token.UserID, c.secret, time.Duration(time.Hour))
+	if err != nil {
+		http.Error(w, "unable to create new token", http.StatusInternalServerError)
+		return
+	}
+	res := responseStruct{Token: authToken}
+	json.NewEncoder(w).Encode(&res)
+	w.WriteHeader(http.StatusOK)
+
+}
+
+func (c *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		http.Error(w, "Unable to find token", http.StatusNotFound)
+		log.Printf("Unable to extract header: %s\n", err)
+		return
+	}
+	token, err := c.queries.GetOneRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		http.Error(w, "Unable to find token", http.StatusNotFound)
+		return
+	}
+
+	if time.Now().After(token.ExpiresAt) || token.RevokedAt.Valid {
+		http.Error(w, "Token has expired or has been revoked", http.StatusUnauthorized)
+		return
+	}
+	if err = c.queries.RevokeToken(r.Context(), tokenString); err != nil {
+		http.Error(w, "Could not revoke token", http.StatusInternalServerError)
+		log.Printf("Error sending sql: %s\n", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
