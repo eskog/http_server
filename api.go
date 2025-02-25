@@ -188,7 +188,7 @@ func (c *apiConfig) getSingleChirp() http.Handler {
 		}
 		data, err := c.queries.GetSingleChirp(r.Context(), id)
 		if err != nil {
-			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			http.Error(rw, err.Error(), http.StatusNotFound)
 			return
 		}
 		json.NewEncoder(rw).Encode(&data)
@@ -300,6 +300,87 @@ func (c *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request) {
 	if err = c.queries.RevokeToken(r.Context(), tokenString); err != nil {
 		http.Error(w, "Could not revoke token", http.StatusInternalServerError)
 		log.Printf("Error sending sql: %s\n", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *apiConfig) updateUserEmailPassword(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		http.Error(w, "Unable to extract JWT", http.StatusUnauthorized)
+		return
+	}
+	userID, err := auth.ValidateJWT(tokenString, c.secret)
+	type requestStruct struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err != nil {
+		http.Error(w, "Token not valid, GTFO", http.StatusUnauthorized)
+		return
+	}
+	var req requestStruct
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "unable to process request", http.StatusUnprocessableEntity)
+		return
+	}
+	req.Password, err = auth.HashPassword(req.Password)
+	if err != nil {
+		http.Error(w, "Could not process password", http.StatusInternalServerError)
+		return
+	}
+	dbUser, err := c.queries.UpdateUserEmailPassword(r.Context(), database.UpdateUserEmailPasswordParams{
+		ID:             userID,
+		Email:          req.Email,
+		HashedPassword: req.Password,
+	})
+	if err != nil {
+		http.Error(w, "Unable to update database", http.StatusInternalServerError)
+		return
+	}
+	dbUser.HashedPassword = ""
+	json.NewEncoder(w).Encode(&dbUser)
+	w.WriteHeader(http.StatusOK)
+
+}
+
+func (c *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	/*
+		Authenticate user
+		Make sure user "owns" the chirp. Then delete chirp
+		if successfully deleted. return 204, else return 404
+		id, err := uuid.Parse(r.PathValue("chirpID"))
+	*/
+
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		http.Error(w, "Unable to extract token", http.StatusUnauthorized)
+		return
+	}
+	userID, err := auth.ValidateJWT(tokenString, c.secret)
+	if err != nil {
+		http.Error(w, "Token not valid", http.StatusUnauthorized)
+		return
+	}
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		http.Error(w, "unable to parse chirpID", http.StatusNotFound)
+		return
+	}
+	chirp, err := c.queries.GetSingleChirp(r.Context(), chirpID)
+	if err != nil {
+		http.Error(w, "Can not find chirp", http.StatusNotFound)
+		return
+	}
+	if chirp.UserID != userID {
+		http.Error(w, "Not authorized to delete this chirp", http.StatusForbidden)
+		return
+	}
+	err = c.queries.DeleteSingleChirp(r.Context(), chirp.ID)
+	if err != nil {
+		http.Error(w, "Chirp not found", http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

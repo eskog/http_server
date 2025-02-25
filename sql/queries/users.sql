@@ -14,3 +14,10 @@ SELECT * FROM users WHERE email = $1;
 
 -- name: DropAllUsers :exec
 TRUNCATE TABLE users;
+
+-- name: UpdateUserEmailPassword :one
+UPDATE users
+SET email = $2,
+    hashed_password = $3
+WHERE id = $1
+RETURNING *;
