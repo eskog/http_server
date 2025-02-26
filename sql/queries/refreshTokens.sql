@@ -21,4 +21,4 @@ SET revoked_at = NOW(),
 WHERE token = $1;
 
 -- name: DropAllTokens :exec
-TRUNCATE TABLE refresh_tokens;
+TRUNCATE TABLE refresh_tokens CASCADE;

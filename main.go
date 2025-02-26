@@ -22,6 +22,7 @@ func main() {
 	}
 	cfg.queries = *database.New(db)
 	cfg.secret = os.Getenv("SECRET")
+	cfg.polka_key = os.Getenv("POLKA_KEY")
 	mux := http.NewServeMux()
 	mux.Handle("/app/", cfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
 	mux.Handle("GET /admin/metrics", cfg.metrics())
@@ -36,6 +37,7 @@ func main() {
 	mux.Handle("POST /api/revoke", http.HandlerFunc(cfg.revokeRefreshToken))
 	mux.Handle("PUT /api/users", http.HandlerFunc(cfg.updateUserEmailPassword))
 	mux.Handle("DELETE /api/chirps/{chirpID}", http.HandlerFunc(cfg.deleteChirp))
+	mux.Handle("POST /api/polka/webhooks", http.HandlerFunc(cfg.upgradeUser))
 
 	httpserver := http.Server{
 		Handler: mux,

@@ -52,7 +52,7 @@ func (q *Queries) DeleteSingleChirp(ctx context.Context, id uuid.UUID) error {
 }
 
 const dropAllChirps = `-- name: DropAllChirps :exec
-TRUNCATE TABLE chirps
+TRUNCATE TABLE chirps CASCADE
 `
 
 func (q *Queries) DropAllChirps(ctx context.Context) error {

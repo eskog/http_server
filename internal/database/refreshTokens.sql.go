@@ -13,7 +13,7 @@ import (
 )
 
 const dropAllTokens = `-- name: DropAllTokens :exec
-TRUNCATE TABLE refresh_tokens
+TRUNCATE TABLE refresh_tokens CASCADE
 `
 
 func (q *Queries) DropAllTokens(ctx context.Context) error {

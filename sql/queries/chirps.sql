@@ -10,7 +10,7 @@ VALUES (
 RETURNING *;
 
 -- name: DropAllChirps :exec
-TRUNCATE TABLE chirps;
+TRUNCATE TABLE chirps CASCADE;
 
 
 -- name: GetAllChirps :many

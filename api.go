@@ -18,6 +18,7 @@ type apiConfig struct {
 	queries        database.Queries
 	Platform       string
 	secret         string
+	polka_key      string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -107,6 +108,7 @@ func (c *apiConfig) login() http.Handler {
 			Email        string    `json:"email"`
 			Token        string    `json:"token"`
 			Refreshtoken string    `json:"refresh_token"`
+			IsChripyRed  bool      `json:"is_chirpy_red"`
 		}
 
 		defer r.Body.Close()
@@ -134,6 +136,7 @@ func (c *apiConfig) login() http.Handler {
 			Email:        user.Email,
 			Token:        "",
 			Refreshtoken: "",
+			IsChripyRed:  user.IsChirpyRed,
 		}
 
 		token, err := auth.MakeJWT(res.ID, c.secret, time.Second*3600)
