@@ -52,6 +52,7 @@ func (cfg *apiConfig) reset() http.Handler {
 		cfg.fileServerHits.Swap(0)
 		cfg.queries.DropAllUsers(r.Context())
 		cfg.queries.DropAllChirps(r.Context())
+		cfg.queries.DropAllTokens(r.Context())
 		rw.WriteHeader(http.StatusOK)
 	})
 }

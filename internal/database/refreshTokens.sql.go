@@ -12,6 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const dropAllTokens = `-- name: DropAllTokens :exec
+TRUNCATE TABLE refresh_tokens
+`
+
+func (q *Queries) DropAllTokens(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, dropAllTokens)
+	return err
+}
+
 const getOneRefreshToken = `-- name: GetOneRefreshToken :one
 SELECT token, created_at, updated_at, user_id, expires_at, revoked_at from refresh_tokens
 WHERE token = $1
