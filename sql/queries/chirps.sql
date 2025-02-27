@@ -14,7 +14,12 @@ TRUNCATE TABLE chirps CASCADE;
 
 
 -- name: GetAllChirps :many
-SELECT * from chirps 
+SELECT * FROM chirps 
+ORDER BY created_at ASC;
+
+-- name: GetAllChirpsByAuthor :many
+SELECT * FROM chirps
+where user_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetSingleChirp :one

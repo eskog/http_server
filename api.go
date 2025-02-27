@@ -7,6 +7,7 @@ import (
 	"http_server/internal/database"
 	"log"
 	"net/http"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -169,18 +170,35 @@ func (c *apiConfig) login() http.Handler {
 	})
 }
 
-func (c *apiConfig) getAllChirps() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		rw.Header().Add("Content-Type", "application/json")
-		data, err := c.queries.GetAllChirps(r.Context())
+func (c *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(r.URL.Query().Get("author_id"))
+	var data []database.Chirp
+	if err != nil {
+		data, err = c.queries.GetAllChirps(r.Context())
 		if err != nil {
-			http.Error(rw, "Can not retrieve data", http.StatusNotFound)
+			http.Error(w, "Can not retrieve data", http.StatusNotFound)
+			return
 		}
-		if err := json.NewEncoder(rw).Encode(&data); err != nil {
-			http.Error(rw, "Could not marshal data", http.StatusInternalServerError)
+	} else {
+		data, err = c.queries.GetAllChirpsByAuthor(r.Context(), userID)
+		if err != nil {
+			http.Error(w, "Could not retrieve data", http.StatusNotFound)
+			return
 		}
-		rw.WriteHeader(http.StatusOK)
-	})
+	}
+	sorting := r.URL.Query().Get("sort")
+	if sorting == "desc" {
+		sort.Slice(data, func(i, j int) bool {
+			return data[i].CreatedAt.After(data[j].CreatedAt)
+		})
+	}
+	if err := json.NewEncoder(w).Encode(&data); err != nil {
+		http.Error(w, "Could not marshal data", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
 }
 
 func (c *apiConfig) getSingleChirp() http.Handler {
