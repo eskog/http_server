@@ -14,7 +14,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const CONTENTTYPE string = "Content-Type"
+const (
+	CONTENTTYPE string = "Content-Type"
+	APPTYPE     string = "application/json"
+)
 
 type apiConfig struct {
 	fileServerHits atomic.Int32
@@ -93,7 +96,7 @@ func (c *apiConfig) createUser() http.Handler {
 		createdUser.HashedPassword = ""
 		rw.WriteHeader(http.StatusCreated)
 		json.NewEncoder(rw).Encode(&createdUser)
-		rw.Header().Add(CONTENTTYPE, "application/json")
+		rw.Header().Add(CONTENTTYPE, APPTYPE)
 
 	})
 }
@@ -216,7 +219,7 @@ func (c *apiConfig) getSingleChirp() http.Handler {
 			return
 		}
 		json.NewEncoder(rw).Encode(&data)
-		rw.Header().Add(CONTENTTYPE, "application/json")
+		rw.Header().Add(CONTENTTYPE, APPTYPE)
 		rw.WriteHeader(http.StatusOK)
 
 	})
@@ -265,7 +268,7 @@ func (c *apiConfig) postChirp() http.Handler {
 		}
 		rw.WriteHeader(http.StatusCreated)
 		json.NewEncoder(rw).Encode(&createdChirp)
-		rw.Header().Add(CONTENTTYPE, "application/json")
+		rw.Header().Add(CONTENTTYPE, APPTYPE)
 
 	})
 }
