@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const CONTENTTYPE string = "Content-Type"
+
 type apiConfig struct {
 	fileServerHits atomic.Int32
 	queries        database.Queries
@@ -35,7 +37,7 @@ func (cfg *apiConfig) metrics() http.Handler {
 	log.Println("Metrics triggered")
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(http.StatusOK)
-		rw.Header().Add("Content-Type", "text/html")
+		rw.Header().Add(CONTENTTYPE, "text/html")
 		fmt.Fprintf(rw, `<html>
   <body>
     <h1>Welcome, Chirpy Admin</h1>
@@ -91,7 +93,7 @@ func (c *apiConfig) createUser() http.Handler {
 		createdUser.HashedPassword = ""
 		rw.WriteHeader(http.StatusCreated)
 		json.NewEncoder(rw).Encode(&createdUser)
-		rw.Header().Add("Content-Type", "application/json")
+		rw.Header().Add(CONTENTTYPE, "application/json")
 
 	})
 }
@@ -214,7 +216,7 @@ func (c *apiConfig) getSingleChirp() http.Handler {
 			return
 		}
 		json.NewEncoder(rw).Encode(&data)
-		rw.Header().Add("Content-Type", "applicatio/json")
+		rw.Header().Add(CONTENTTYPE, "application/json")
 		rw.WriteHeader(http.StatusOK)
 
 	})
@@ -233,7 +235,7 @@ func (c *apiConfig) postChirp() http.Handler {
 			return
 		}
 		log.Printf("Have extracted token: %s", token)
-		user_id, err := auth.ValidateJWT(token, c.secret)
+		userid, err := auth.ValidateJWT(token, c.secret)
 		if err != nil {
 			http.Error(rw, "Unable to verify token", http.StatusUnauthorized)
 			log.Printf("Unable to verify token, err: %s", err)
@@ -252,7 +254,7 @@ func (c *apiConfig) postChirp() http.Handler {
 		req.Body = cleanupInput(req.Body)
 		data := database.CreateChirpParams{
 			Body:   req.Body,
-			UserID: user_id,
+			UserID: userid,
 		}
 
 		createdChirp, err := c.queries.CreateChirp(r.Context(), data)
@@ -263,7 +265,7 @@ func (c *apiConfig) postChirp() http.Handler {
 		}
 		rw.WriteHeader(http.StatusCreated)
 		json.NewEncoder(rw).Encode(&createdChirp)
-		rw.Header().Add("Content-Type", "application/json")
+		rw.Header().Add(CONTENTTYPE, "application/json")
 
 	})
 }
